@@ -1,10 +1,10 @@
-import 'dart:async';
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_patronbloc_example/game/game_bloc.dart';
 import 'counter/counter_bloc.dart';
 import 'counter/counter_event.dart';
+import 'game/game_event.dart';
+import 'game/game_state.dart';
 
 void main() {
   runApp(const MyApp());
@@ -20,201 +20,160 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: BlocProvider(create: (_) => CounterBloc(), child: CounterPage()),
+      home: MultiBlocProvider(
+        providers: [
+          BlocProvider<GameBloc>(create: (context) => GameBloc()),
+          BlocProvider<CounterBloc>(
+            create: (context) => CounterBloc(
+              gameBloc: context.read<GameBloc>(),
+            ),
+          ),
+        ],
+        child: const CounterPage(),
+      ),
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-class CounterPage extends StatefulWidget {
+class CounterPage extends StatelessWidget {
   const CounterPage({super.key});
-
-  @override
-  State<CounterPage> createState() => _CounterPageState();
-}
-
-class _CounterPageState extends State<CounterPage> {
-  Timer? timer;
-  Timer? countdownTimer;
-  double progress = 1.0; // Progreso de la barra
-  final int countdownSeconds = 5;
-  int randomNumber = 0;
-  int puntaje = 0, record = 0;
-  bool isCounting = false;
-  late CounterBloc counterBloc;
-
-  @override
-  void initState() {
-    super.initState();
-    counterBloc = context.read<CounterBloc>();
-  }
-
-  void startCountdown() {
-    countdownTimer?.cancel();
-    setState(() {
-      progress = 1.0;
-      randomNumber = generateRandomNumber();
-    });
-    int elapsed = 0;
-    countdownTimer = Timer.periodic(const Duration(milliseconds: 50), (t) {
-      elapsed += 50;
-      setState(() {
-        progress = 1.0 - (elapsed / (countdownSeconds * 1000));
-        if (progress <= 0.0) {
-          progress = 0.0;
-          countdownTimer?.cancel();
-          if (counterBloc.state == randomNumber) {
-            setState(() => puntaje++);
-          } else {
-            if (puntaje > record) {
-              setState(() => record = puntaje);
-            }
-            setState(() => puntaje = 0);
-          }
-          if (isCounting) {
-            startCountdown();
-          }
-        }
-      });
-    });
-  }
-
-  void toggleCountdown() {
-    if (isCounting) {
-      // Detener
-      countdownTimer?.cancel();
-      setState(() {
-        isCounting = false;
-        progress = 1.0;
-        randomNumber = 0;
-        record = 0;
-        puntaje = 0;
-      });
-      context.read<CounterBloc>().add(CounterReset());
-    } else {
-      // Iniciar
-      setState(() {
-        isCounting = true;
-      });
-      startCountdown();
-    }
-  }
-
-  @override
-  void dispose() {
-    timer?.cancel();
-    countdownTimer?.cancel();
-    super.dispose();
-  }
-
-  int generateRandomNumber() {
-    return Random().nextInt(101) - 50;
-  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text("Counter con BLoC"),
+        title: const Text("Counter Game con BLoC"),
       ),
-      body: BlocBuilder<CounterBloc, int>(
-        builder: (context, count) {
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              Column(
+      body: BlocBuilder<GameBloc, GameState>(
+        builder: (context, gameState) {
+          return BlocBuilder<CounterBloc, int>(
+            builder: (context, counterValue) {
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  Text(
-                    'Objetivo: $randomNumber',
-                    style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
+                  // Panel del juego
+                  Column(
+                    children: [
+                      Text(
+                        gameState.isRunning 
+                          ? 'Objetivo: ${gameState.targetNumber}'
+                          : 'Presiona "Iniciar" para jugar',
+                        style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 64,
+                          vertical: 24,
+                        ),
+                        child: LinearProgressIndicator( // (countdown)
+                          value: gameState.progress,
+                          minHeight: 20,
+                          borderRadius: BorderRadius.circular(10),
+                          backgroundColor: Colors.grey.shade300,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            gameState.progress > 0.5 
+                              ? Colors.green 
+                              : gameState.progress > 0.25 
+                                ? Colors.orange 
+                                : Colors.red,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        "Puntaje: ${gameState.score}",
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                      Text(
+                        "Mejor Récord: ${gameState.record}",
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                    ],
+                  ),
+                  
+                  // Botón de control del juego
+                  ElevatedButton(
+                    onPressed: () {
+                      if (gameState.isRunning) {
+                        context.read<GameBloc>().add(GameStopped());
+                        context.read<CounterBloc>().add(CounterReset());
+                      } else {
+                        context.read<GameBloc>().add(GameStarted());
+                      }
+                    },
+                    child: Text(gameState.isRunning ? "Detener" : "Iniciar"),
+                  ),
+                  
+                  // Contador actual
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.deepPurple.shade200),
+                    ),
+                    child: Text(
+                      '$counterValue', 
+                      style: const TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 64,
-                      vertical: 24,
-                    ),
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 20,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  Text("Puntaje: $puntaje"),
-                  Text("Mejor Record: $record"),
                 ],
-              ),
-              ElevatedButton(
-                onPressed: toggleCountdown,
-                child: Text(isCounting ? "Detener" : "Iniciar"),
-              ),
-              Text('$count', style: const TextStyle(fontSize: 48)),
-            ],
+              );
+            },
           );
         },
       ),
-      floatingActionButton: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          GestureDetector(
-            onLongPressStart: (_) {
-              int interval = 100; // intervalo inicial en ms
-              int minInterval = 50; // límite mínimo para no ir demasiado rápido
-              void startRepeating() {
-                timer = Timer.periodic(Duration(milliseconds: interval), (t) {
-                  context.read<CounterBloc>().add(CounterIncremented());
-                  // Acelera reduciendo el intervalo cada 1 segundo aprox
-                  if (interval > minInterval) {
-                    interval = (interval * 0.8)
-                        .toInt(); // reduce 20% el intervalo
-                    t.cancel();
-                    startRepeating(); // reinicia con nuevo intervalo
+      floatingActionButton: BlocBuilder<GameBloc, GameState>(
+        builder: (context, gameState) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              // Botón incrementar
+              GestureDetector( // Detecta gestos de pulsación larga
+                onLongPressStart: (_) { // Aquí se maneja el inicio de la pulsación larga
+                  if (gameState.isRunning) { // Solo si el juego está en curso
+                    context.read<CounterBloc>().add(CounterAutoIncrementStarted()); // Inicia la acción de incremento automático
                   }
-                });
-              }
-
-              startRepeating();
-            },
-            onLongPressEnd: (_) {
-              timer?.cancel();
-            },
-            child: FloatingActionButton(
-              onPressed: () =>
-                  context.read<CounterBloc>().add(CounterIncremented()),
-              child: const Icon(Icons.add),
-            ),
-          ),
-          GestureDetector(
-            onLongPressStart: (_) {
-              int interval = 100; // intervalo inicial en ms
-              int minInterval = 50; // límite mínimo para no ir demasiado rápido
-              void startRepeating() {
-                timer = Timer.periodic(Duration(milliseconds: interval), (t) {
-                  context.read<CounterBloc>().add(CounterDecremented());
-                  if (interval > minInterval) {
-                    interval = (interval * 0.8)
-                        .toInt(); // reduce 20% el intervalo
-                    t.cancel();
-                    startRepeating(); // reinicia con nuevo intervalo
+                },
+                onLongPressEnd: (_) { // Aquí se maneja el final de la pulsación larga
+                  context.read<CounterBloc>().add(CounterAutoRepeatStopped()); // Detiene la acción de incremento automático
+                },
+                child: FloatingActionButton(
+                  onPressed: gameState.isRunning ? () { // Solo si el juego está en curso
+                    context.read<CounterBloc>().add(CounterIncremented()); // Incrementa el contador en 1 al presionar 1 vez
+                  } : null, // Si el juego no está en curso, el botón no hace nada
+                  backgroundColor: gameState.isRunning ? null : Colors.grey,
+                  child: const Icon(Icons.add), 
+                ),
+              ),
+              // Botón decrementar
+              GestureDetector( // Detecta gestos de pulsación larga
+                onLongPressStart: (_) { // Aquí se maneja el inicio de la pulsación larga
+                  if (gameState.isRunning) { // Solo si el juego está en curso
+                    context.read<CounterBloc>().add(CounterAutoDecrementStarted()); // Inicia la acción de decremento automático
                   }
-                });
-              }
-
-              startRepeating();
-            },
-            onLongPressEnd: (_) {
-              timer?.cancel();
-            },
-            child: FloatingActionButton(
-              onPressed: () =>
-                  context.read<CounterBloc>().add(CounterDecremented()),
-              child: const Icon(Icons.remove),
-            ),
-          ),
-        ],
+                },
+                onLongPressEnd: (_) { // Aquí se maneja el final de la pulsación larga
+                  context.read<CounterBloc>().add(CounterAutoRepeatStopped()); // Detiene la acción de decremento automático
+                },
+                child: FloatingActionButton(
+                  onPressed: gameState.isRunning ? () { // Solo si el juego está en curso
+                    context.read<CounterBloc>().add(CounterDecremented()); // Decrementa el contador en 1 al presionar 1 vez
+                  } : null, // Si el juego no está en curso, el botón no hace nada
+                  backgroundColor: gameState.isRunning ? null : Colors.grey,
+                  child: const Icon(Icons.remove),
+                ),
+              ),
+            ],
+          );
+        },
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
